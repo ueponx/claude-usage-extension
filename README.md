@@ -4,6 +4,14 @@ Claude.aiの使用量を簡単に確認できるChrome拡張機能です。
 
 ## 📦 インストール方法
 
+**フローティングウィジェットの展開**
+
+<img width="211" height="273" alt="2025-10-25_22h34_04" src="https://github.com/user-attachments/assets/d7e3080d-7a21-4493-8975-0f0113fcac6c" />
+
+**フローティングウィジェットの折りたたみ**
+
+<img width="135" height="43" alt="2025-10-25_22h55_06" src="https://github.com/user-attachments/assets/79b595a4-6b41-4b35-981e-5540f99c4e67" />
+
 ### 1. ファイルの準備
 
 すべてのファイルが同じフォルダに入っていることを確認してください：
