@@ -47,6 +47,18 @@
   function createWidget() {
     console.log('[Claude Usage Widget] createWidget called');
     
+    // 既にwidget変数に値がある場合は作成しない
+    if (widget) {
+      console.log('[Claude Usage Widget] Widget variable already set, skipping creation');
+      return;
+    }
+    
+    // DOM上に既に存在する場合も作成しない
+    if (document.getElementById('claude-usage-widget')) {
+      console.log('[Claude Usage Widget] Widget element already exists in DOM, skipping creation');
+      return;
+    }
+    
     widget = document.createElement('div');
     widget.id = 'claude-usage-widget';
     widget.innerHTML = `
@@ -84,7 +96,59 @@
       updateInterval = setInterval(fetchUsageData, 5 * 60 * 1000);
     } else {
       console.log('[Claude Usage Widget] Not on usage page, loading cached data');
-      loadCachedData();
+      // キャッシュをチェック
+      chrome.storage.local.get(['usageData', 'lastUpdate', 'hasShownInitialFetch'], (result) => {
+        const hasCache = result.usageData && result.lastUpdate;
+        const hasShownInitial = result.hasShownInitialFetch;
+        
+        if (!hasCache && !hasShownInitial) {
+          // 初回起動（キャッシュなし & 初回フラグなし）の場合のみ自動取得
+          console.log('[Claude Usage Widget] First time launch, fetching data automatically');
+          
+          const content = widget.querySelector('.widget-content');
+          content.innerHTML = `
+            <div class="widget-loading">
+              <div class="widget-spinner"></div>
+              <div>初回データ取得中...</div>
+            </div>
+          `;
+          
+          // 初回フラグを設定
+          chrome.storage.local.set({ hasShownInitialFetch: true });
+          
+          // データ取得
+          chrome.runtime.sendMessage({ action: 'fetchUsageData' }, (response) => {
+            if (response && response.success) {
+              console.log('[Claude Usage Widget] Initial data fetched successfully');
+              displayData(response.data, response.lastUpdate);
+            } else {
+              console.log('[Claude Usage Widget] Failed to fetch initial data');
+              content.innerHTML = `
+                <div class="widget-info">
+                  データの取得に失敗しました<br>
+                  <small>🔄ボタンをクリックして再試行してください</small>
+                </div>
+              `;
+            }
+          });
+        } else {
+          // 2回目以降、またはキャッシュがある場合は通常のキャッシュロード
+          loadCachedData();
+        }
+        
+        // すべてのページで5分ごとに自動更新
+        updateInterval = setInterval(() => {
+          console.log('[Claude Usage Widget] Auto-refresh triggered');
+          chrome.runtime.sendMessage({ action: 'fetchUsageData' }, (response) => {
+            if (response && response.success) {
+              console.log('[Claude Usage Widget] Auto-refresh successful');
+              displayData(response.data, response.lastUpdate);
+            } else {
+              console.log('[Claude Usage Widget] Auto-refresh failed');
+            }
+          });
+        }, 5 * 60 * 1000);
+      });
     }
   }
 
@@ -100,13 +164,65 @@
     document.addEventListener('mousemove', drag);
     document.addEventListener('mouseup', dragEnd);
 
+    // リフレッシュ中フラグ
+    let isRefreshing = false;
+
     // ボタン
     refreshBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      
+      // 既にリフレッシュ中の場合は無視
+      if (isRefreshing) {
+        console.log('[Claude Usage Widget] Already refreshing, ignoring click');
+        return;
+      }
+      
+      isRefreshing = true;
+      refreshBtn.disabled = true;
+      refreshBtn.style.opacity = '0.5';
+      
       if (isUsagePage()) {
+        // 使用量ページにいる場合は直接データを取得
         fetchUsageData();
+        
+        // 完了後にフラグをリセット
+        setTimeout(() => {
+          isRefreshing = false;
+          refreshBtn.disabled = false;
+          refreshBtn.style.opacity = '1';
+        }, 2000);
       } else {
-        showMessage('使用量ページでのみ更新できます');
+        // 使用量ページにいない場合はバックグラウンドで取得
+        const content = widget.querySelector('.widget-content');
+        content.innerHTML = `
+          <div class="widget-loading">
+            <div class="widget-spinner"></div>
+            <div>データを取得中...</div>
+          </div>
+        `;
+        
+        chrome.runtime.sendMessage({ action: 'fetchUsageData' }, (response) => {
+          if (response && response.success) {
+            console.log('[Claude Usage Widget] Data fetched successfully');
+            displayData(response.data, response.lastUpdate);
+          } else {
+            console.log('[Claude Usage Widget] Failed to fetch data');
+            content.innerHTML = `
+              <div class="widget-error">
+                データの取得に失敗しました<br>
+                <small>もう一度お試しください</small>
+              </div>
+            `;
+            setTimeout(() => {
+              loadCachedData();
+            }, 2000);
+          }
+          
+          // 完了後にフラグをリセット
+          isRefreshing = false;
+          refreshBtn.disabled = false;
+          refreshBtn.style.opacity = '1';
+        });
       }
     });
 
@@ -212,7 +328,9 @@
     if (updateInterval) {
       clearInterval(updateInterval);
     }
-    widget.remove();
+    if (widget && widget.parentNode) {
+      widget.remove();
+    }
     widget = null;
     
     // 非表示状態を保存
@@ -254,17 +372,37 @@
     console.log('[Claude Usage Widget] Loading cached data');
     chrome.storage.local.get(['usageData', 'lastUpdate'], (result) => {
       console.log('[Claude Usage Widget] Cached data result:', result);
-      if (result.usageData) {
+      
+      const now = Date.now();
+      const cacheAge = result.lastUpdate ? (now - result.lastUpdate) / 1000 / 60 : Infinity; // 分単位
+      
+      // キャッシュがあり、5分以内のものであればそれを使用
+      if (result.usageData && cacheAge < 5) {
+        console.log('[Claude Usage Widget] Using cached data (age:', Math.floor(cacheAge), 'minutes)');
         displayData(result.usageData, result.lastUpdate);
-      } else {
-        console.log('[Claude Usage Widget] No cached data found');
+      } 
+      // キャッシュがないか、古い場合は案内メッセージを表示（自動取得はしない）
+      else {
+        console.log('[Claude Usage Widget] No recent cached data found (age:', Math.floor(cacheAge), 'minutes)');
         const content = widget.querySelector('.widget-content');
-        content.innerHTML = `
-          <div class="widget-info">
-            キャッシュデータがありません<br>
-            <small>claude.ai/settings/usage を開いてください</small>
-          </div>
-        `;
+        
+        if (result.usageData) {
+          // 古いキャッシュがある場合は表示して、更新を促す
+          displayData(result.usageData, result.lastUpdate);
+          // メッセージを追加
+          const footer = content.querySelector('.widget-footer');
+          if (footer) {
+            footer.innerHTML += '<br><small style="color: #ee7800;">🔄ボタンで最新データに更新できます</small>';
+          }
+        } else {
+          // キャッシュが全くない場合
+          content.innerHTML = `
+            <div class="widget-info">
+              まだデータがありません<br>
+              <small>🔄ボタンをクリックしてデータを取得してください</small>
+            </div>
+          `;
+        }
       }
     });
   }
@@ -438,14 +576,20 @@
       const now = new Date();
       const diffMinutes = Math.floor((now - updateTime) / 60000);
       
+      // 時刻をHH:mm形式で表示
+      const hours = updateTime.getHours().toString().padStart(2, '0');
+      const minutes = updateTime.getMinutes().toString().padStart(2, '0');
+      const timeString = `${hours}:${minutes}`;
+      
       let timeText;
-      if (diffMinutes < 1) {
-        timeText = 'たった今';
-      } else if (diffMinutes < 60) {
-        timeText = `${diffMinutes}分前`;
+      if (diffMinutes < 60) {
+        // 1時間以内の場合は「HH:mm (N分前)」
+        timeText = `${timeString} (${diffMinutes}分前)`;
       } else if (diffMinutes < 1440) {
-        timeText = `${Math.floor(diffMinutes / 60)}時間前`;
+        // 24時間以内の場合は「HH:mm (N時間前)」
+        timeText = `${timeString} (${Math.floor(diffMinutes / 60)}時間前)`;
       } else {
+        // それ以上の場合は完全な日時表示
         timeText = updateTime.toLocaleString('ja-JP');
       }
 
@@ -461,7 +605,13 @@
 
   // ウィジェットを初期化
   function initWidget() {
-    console.log('[Claude Usage Widget] Initializing widget...');
+    console.log('[Claude Usage Widget] Initializing widget, readyState:', document.readyState);
+    
+    // bodyが存在しない場合は次のタイミングを待つ
+    if (!document.body) {
+      console.log('[Claude Usage Widget] Body not ready yet, will retry');
+      return false;
+    }
     
     chrome.storage.local.get(['widgetVisible', 'widgetCollapsed'], (result) => {
       console.log('[Claude Usage Widget] Storage result:', result);
@@ -478,7 +628,7 @@
       createWidget();
 
       // 折りたたみ状態を復元
-      if (result.widgetCollapsed) {
+      if (result.widgetCollapsed && widget) {
         widget.classList.add('collapsed');
         const toggleBtn = widget.querySelector('#widget-toggle');
         if (toggleBtn) {
@@ -489,15 +639,64 @@
       
       console.log('[Claude Usage Widget] Widget created successfully');
     });
+    
+    return true;
   }
 
-  // DOMContentLoadedまたはページ読み込み後に初期化
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initWidget);
-  } else {
-    // DOMが既に読み込まれている場合
-    initWidget();
+  // 複数のタイミングで初期化を試みる
+  function tryInitWidget() {
+    console.log('[Claude Usage Widget] tryInitWidget called, readyState:', document.readyState);
+    
+    // 既にウィジェットが存在する場合はスキップ
+    if (widget || document.getElementById('claude-usage-widget')) {
+      console.log('[Claude Usage Widget] Widget already exists, skipping init');
+      return;
+    }
+    
+    // bodyが存在する場合のみ初期化を試みる
+    if (document.body) {
+      initWidget();
+    } else {
+      console.log('[Claude Usage Widget] Body not ready, waiting...');
+    }
   }
+
+  // 1. 即座に実行（DOMが既に準備されている場合）
+  console.log('[Claude Usage Widget] Initial check, readyState:', document.readyState);
+  if (document.readyState === 'complete') {
+    console.log('[Claude Usage Widget] Document complete, initializing immediately');
+    setTimeout(tryInitWidget, 100);
+  } else if (document.readyState === 'interactive') {
+    console.log('[Claude Usage Widget] Document interactive, initializing with delay');
+    setTimeout(tryInitWidget, 200);
+  }
+  
+  // 2. DOMContentLoaded
+  if (document.readyState === 'loading') {
+    console.log('[Claude Usage Widget] Waiting for DOMContentLoaded');
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log('[Claude Usage Widget] DOMContentLoaded fired');
+      setTimeout(tryInitWidget, 100);
+    });
+  }
+  
+  // 3. load イベント（完全ロード後）
+  window.addEventListener('load', () => {
+    console.log('[Claude Usage Widget] Window load event fired');
+    setTimeout(tryInitWidget, 300);
+  });
+  
+  // 4. 最後の保険として、1秒後に再試行
+  setTimeout(() => {
+    console.log('[Claude Usage Widget] Final retry after 1 second');
+    tryInitWidget();
+  }, 1000);
+  
+  // 5. さらに念のため、2秒後にも試行
+  setTimeout(() => {
+    console.log('[Claude Usage Widget] Extra retry after 2 seconds');
+    tryInitWidget();
+  }, 2000);
 
   // ページ変更を監視
   let lastUrl = location.href;
@@ -530,5 +729,22 @@
   
   observer.observe(document, { subtree: true, childList: true });
   console.log('[Claude Usage Widget] Page change observer set up');
+
+  // ストレージ変更を監視（他のタブでデータが更新された時に反映）
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes.usageData && widget) {
+      console.log('[Claude Usage Widget] Usage data updated in storage');
+      // ウィジェットが存在し、使用量ページにいない場合のみ更新
+      // （使用量ページにいる場合は自動更新が動いているため）
+      if (!isUsagePage()) {
+        chrome.storage.local.get(['usageData', 'lastUpdate'], (result) => {
+          if (result.usageData) {
+            displayData(result.usageData, result.lastUpdate);
+          }
+        });
+      }
+    }
+  });
+  console.log('[Claude Usage Widget] Storage change listener set up');
 
 })();

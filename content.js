@@ -1,5 +1,11 @@
 // Claude.aiのページからデータを抽出
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'ping') {
+    // Content scriptが読み込まれているか確認するためのpingに応答
+    sendResponse({ pong: true });
+    return true;
+  }
+  
   if (request.action === 'getUsageData') {
     try {
       const usageData = extractUsageData();
@@ -24,6 +30,12 @@ function extractUsageData() {
   
   // デバッグ用にページテキストの一部をログ出力
   console.log('Page text sample:', pageText.substring(0, 1000));
+  
+  // ページが完全に読み込まれているかチェック
+  if (pageText.length < 100) {
+    console.warn('Page text is too short, page may not be fully loaded');
+    throw new Error('ページが完全に読み込まれていません。しばらく待ってから再試行してください。');
+  }
   
   // より柔軟なパターンマッチング - "使用済み"の前後にあるパーセンテージを探す
   
@@ -69,7 +81,9 @@ function extractUsageData() {
   // データが取得できたかチェック
   if (!data.currentSession && !data.allModels && !data.opusOnly) {
     console.error('No usage data found in page text');
-    throw new Error('使用量データが見つかりませんでした。ページが完全に読み込まれていることを確認してください。');
+    console.error('Page text length:', pageText.length);
+    console.error('Page URL:', window.location.href);
+    throw new Error('使用量データが見つかりませんでした。使用量ページ(https://claude.ai/settings/usage)が完全に読み込まれていることを確認してください。');
   }
 
   console.log('Extracted data:', data);
