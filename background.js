@@ -371,8 +371,8 @@ async function updateBadge(isEnabled) {
   }
 }
 
-// 定期的にデータを更新する（オプション）
-chrome.alarms.create('updateUsage', { periodInMinutes: 15 });
+// 定期的にデータを更新する（5分ごと）
+chrome.alarms.create('updateUsage', { periodInMinutes: 5 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'updateUsage') {

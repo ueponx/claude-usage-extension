@@ -573,29 +573,15 @@
 
     if (lastUpdate) {
       const updateTime = new Date(lastUpdate);
-      const now = new Date();
-      const diffMinutes = Math.floor((now - updateTime) / 60000);
       
       // 時刻をHH:mm形式で表示
       const hours = updateTime.getHours().toString().padStart(2, '0');
       const minutes = updateTime.getMinutes().toString().padStart(2, '0');
       const timeString = `${hours}:${minutes}`;
-      
-      let timeText;
-      if (diffMinutes < 60) {
-        // 1時間以内の場合は「HH:mm (N分前)」
-        timeText = `${timeString} (${diffMinutes}分前)`;
-      } else if (diffMinutes < 1440) {
-        // 24時間以内の場合は「HH:mm (N時間前)」
-        timeText = `${timeString} (${Math.floor(diffMinutes / 60)}時間前)`;
-      } else {
-        // それ以上の場合は完全な日時表示
-        timeText = updateTime.toLocaleString('ja-JP');
-      }
 
       html += `
         <div class="widget-footer">
-          最終更新: ${timeText}
+          最終更新: ${timeString}
         </div>
       `;
     }
