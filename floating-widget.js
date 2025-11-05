@@ -17,6 +17,7 @@
   let initialX = 0;
   let initialY = 0;
   let updateInterval = null;
+  let useRightPosition = true; // 右端からの位置を使用するフラグ
 
   // バックグラウンドスクリプトからのメッセージを受信
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -243,8 +244,15 @@
       return;
     }
 
-    initialX = e.clientX - currentX;
-    initialY = e.clientY - currentY;
+    if (useRightPosition) {
+      // 右端からの距離を使用する場合
+      const rightDistance = window.innerWidth - (widget.getBoundingClientRect().left + widget.offsetWidth);
+      initialX = e.clientX + rightDistance;
+      initialY = e.clientY - currentY;
+    } else {
+      initialX = e.clientX - currentX;
+      initialY = e.clientY - currentY;
+    }
     isDragging = true;
     widget.classList.add('dragging');
   }
@@ -254,12 +262,24 @@
     if (!isDragging) return;
 
     e.preventDefault();
-    currentX = e.clientX - initialX;
-    currentY = e.clientY - initialY;
 
-    widget.style.left = currentX + 'px';
-    widget.style.top = currentY + 'px';
-    widget.style.right = 'auto';
+    if (useRightPosition) {
+      // 右端からの距離を計算
+      const rightDistance = initialX - e.clientX;
+      currentX = rightDistance;
+      currentY = e.clientY - initialY;
+
+      widget.style.right = rightDistance + 'px';
+      widget.style.top = currentY + 'px';
+      widget.style.left = 'auto';
+    } else {
+      currentX = e.clientX - initialX;
+      currentY = e.clientY - initialY;
+
+      widget.style.left = currentX + 'px';
+      widget.style.top = currentY + 'px';
+      widget.style.right = 'auto';
+    }
   }
 
   // ドラッグ終了
@@ -276,7 +296,8 @@
     chrome.storage.local.set({
       widgetPosition: {
         x: currentX,
-        y: currentY
+        y: currentY,
+        useRight: useRightPosition
       }
     });
   }
@@ -285,32 +306,58 @@
   function restorePosition() {
     chrome.storage.local.get(['widgetPosition'], (result) => {
       if (result.widgetPosition) {
+        // 保存された位置設定を復元
+        if (result.widgetPosition.useRight !== undefined) {
+          useRightPosition = result.widgetPosition.useRight;
+        }
+
         currentX = result.widgetPosition.x;
         currentY = result.widgetPosition.y;
 
-        // 画面サイズとウィジェットサイズを取得
+        // 画面サイズを取得
         const screenWidth = window.innerWidth;
         const screenHeight = window.innerHeight;
-        const widgetWidth = 280; // 通常時の幅
-        const widgetHeight = 400; // 推定高さ
+        const widgetWidth = widget.offsetWidth || 280;
 
         // 位置が画面外にある場合は調整
         let adjusted = false;
 
-        // 右端チェック（ウィジェットが画面外に出ている場合）
-        if (currentX + widgetWidth > screenWidth) {
-          currentX = screenWidth - widgetWidth - 20;
-          adjusted = true;
-        }
+        if (useRightPosition) {
+          // 右端からの距離を使用する場合
+          // 右端チェック（負の値にならないように）
+          if (currentX < 0) {
+            currentX = 20;
+            adjusted = true;
+          }
 
-        // 左端チェック
-        if (currentX < 0) {
-          currentX = 20;
-          adjusted = true;
+          // 左端チェック（ウィジェットが画面外に出ないように）
+          if (currentX + widgetWidth > screenWidth - 20) {
+            currentX = 20;
+            adjusted = true;
+          }
+
+          widget.style.right = currentX + 'px';
+          widget.style.left = 'auto';
+        } else {
+          // 左端からの距離を使用する場合（後方互換性のため）
+          // 右端チェック
+          if (currentX + widgetWidth > screenWidth) {
+            currentX = screenWidth - widgetWidth - 20;
+            adjusted = true;
+          }
+
+          // 左端チェック
+          if (currentX < 0) {
+            currentX = 20;
+            adjusted = true;
+          }
+
+          widget.style.left = currentX + 'px';
+          widget.style.right = 'auto';
         }
 
         // 下端チェック
-        if (currentY + 100 > screenHeight) { // 最低100pxは見えるように
+        if (currentY + 100 > screenHeight) {
           currentY = screenHeight - 200;
           adjusted = true;
         }
@@ -321,25 +368,26 @@
           adjusted = true;
         }
 
-        widget.style.left = currentX + 'px';
         widget.style.top = currentY + 'px';
-        widget.style.right = 'auto';
 
         if (adjusted) {
           console.log('[Claude Usage Widget] Position adjusted from', result.widgetPosition, 'to:', currentX, currentY);
           // 調整後の位置を保存
           savePosition();
         } else {
-          console.log('[Claude Usage Widget] Position restored:', currentX, currentY);
+          console.log('[Claude Usage Widget] Position restored:', currentX, currentY, 'useRight:', useRightPosition);
         }
       } else {
-        // 初期位置を設定（右上から20px、幅は約280pxと仮定）
-        currentX = window.innerWidth - 300;
+        // 初期位置を設定（右端から20px）
+        useRightPosition = true;
+        currentX = 20; // 右端からの距離
         currentY = 80;
-        widget.style.left = currentX + 'px';
+        widget.style.right = currentX + 'px';
         widget.style.top = currentY + 'px';
-        widget.style.right = 'auto';
-        console.log('[Claude Usage Widget] Initial position set:', currentX, currentY);
+        widget.style.left = 'auto';
+        console.log('[Claude Usage Widget] Initial position set: right:', currentX, 'top:', currentY);
+        // 初期位置を保存
+        savePosition();
       }
     });
   }
