@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Claude使用量チェッカー",
   "description": "Claude.aiの使用量を表示します",
-  "version": "2.4",
+  "version": "2.5",
   "permissions": [
     "storage",
     "tabs",
