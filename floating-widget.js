@@ -287,10 +287,51 @@
       if (result.widgetPosition) {
         currentX = result.widgetPosition.x;
         currentY = result.widgetPosition.y;
+
+        // 画面サイズとウィジェットサイズを取得
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        const widgetWidth = 280; // 通常時の幅
+        const widgetHeight = 400; // 推定高さ
+
+        // 位置が画面外にある場合は調整
+        let adjusted = false;
+
+        // 右端チェック（ウィジェットが画面外に出ている場合）
+        if (currentX + widgetWidth > screenWidth) {
+          currentX = screenWidth - widgetWidth - 20;
+          adjusted = true;
+        }
+
+        // 左端チェック
+        if (currentX < 0) {
+          currentX = 20;
+          adjusted = true;
+        }
+
+        // 下端チェック
+        if (currentY + 100 > screenHeight) { // 最低100pxは見えるように
+          currentY = screenHeight - 200;
+          adjusted = true;
+        }
+
+        // 上端チェック
+        if (currentY < 0) {
+          currentY = 80;
+          adjusted = true;
+        }
+
         widget.style.left = currentX + 'px';
         widget.style.top = currentY + 'px';
         widget.style.right = 'auto';
-        console.log('[Claude Usage Widget] Position restored:', currentX, currentY);
+
+        if (adjusted) {
+          console.log('[Claude Usage Widget] Position adjusted from', result.widgetPosition, 'to:', currentX, currentY);
+          // 調整後の位置を保存
+          savePosition();
+        } else {
+          console.log('[Claude Usage Widget] Position restored:', currentX, currentY);
+        }
       } else {
         // 初期位置を設定（右上から20px、幅は約280pxと仮定）
         currentX = window.innerWidth - 300;
@@ -615,14 +656,17 @@
 
       // 折りたたみ状態を復元
       if (result.widgetCollapsed && widget) {
+        console.log('[Claude Usage Widget] Restoring collapsed state');
         widget.classList.add('collapsed');
         const toggleBtn = widget.querySelector('#widget-toggle');
         if (toggleBtn) {
           toggleBtn.textContent = '+';
           toggleBtn.title = '展開';
         }
+      } else {
+        console.log('[Claude Usage Widget] Widget is expanded (collapsed state:', result.widgetCollapsed, ')');
       }
-      
+
       console.log('[Claude Usage Widget] Widget created successfully');
     });
     
